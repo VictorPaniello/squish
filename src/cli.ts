@@ -5,6 +5,7 @@ import { Command } from "commander"
 import { findMediaFiles } from "./files.ts"
 import { formatBytes, formatSavings } from "./format.ts"
 import { type ImageFormat, optimizeImage } from "./images.ts"
+import { formatProgressBar } from "./progress.ts"
 import { hasFfmpeg, optimizeVideo, type VideoFormat } from "./video.ts"
 
 const program = new Command()
@@ -64,6 +65,40 @@ async function main(
 
   await mkdir(opts.out, { recursive: true })
 
+  // Checked once up front (rather than inside the video branch below)
+  // so it can also feed totalUnits here, without spawning a second
+  // "ffmpeg -version" just to ask the same question twice.
+  const ffmpegAvailable = videos.length > 0 && !opts.skipVideo ? await hasFfmpeg() : false
+  const willProcessVideo = videos.length > 0 && !opts.skipVideo && ffmpegAvailable
+
+  const totalUnits = images.length * imageFormats.length + (willProcessVideo ? videos.length * videoFormats.length : 0)
+  // An install-script style "[####------] 40%" bar, updated in place via
+  // carriage returns - real terminals only. Piped/redirected output (a
+  // log file, a test harness capturing stdout, CI) gets the plain
+  // line-per-result output it always had instead: raw \r/ANSI bytes are
+  // meaningless once they're not overwriting anything on a live screen.
+  const useProgressBar = totalUnits > 0 && process.stdout.isTTY === true
+  let completed = 0
+
+  function renderBar() {
+    if (!useProgressBar) return
+    process.stdout.write(`\r\x1b[2K${formatProgressBar(completed, totalUnits)}`)
+  }
+
+  /** Prints a line that stays in the scrollback, then redraws the
+   * progress bar underneath it (if enabled) so the bar always ends up
+   * on the last line rather than getting interleaved with real output. */
+  function printLine(text: string, toStderr = false) {
+    const write = toStderr ? console.error : console.log
+    if (useProgressBar) process.stdout.write("\r\x1b[2K")
+    write(text)
+    renderBar()
+  }
+
+  function clearBar() {
+    if (useProgressBar) process.stdout.write("\r\x1b[2K")
+  }
+
   let failures = 0
 
   // Every input file gets its own subfolder under opts.out, named after
@@ -79,16 +114,18 @@ async function main(
   }
 
   if (images.length > 0) {
-    console.log(`Images (${images.length}) -> ${opts.out}/<name>/ (${imageFormats.join(", ")})`)
+    printLine(`Images (${images.length}) -> ${opts.out}/<name>/ (${imageFormats.join(", ")})`)
     for (const path of images) {
       const outDir = await fileOutDir(path)
       for (const format of imageFormats) {
         try {
           const result = await optimizeImage(path, outDir, { ...imageOptions, format })
-          logResult(opts.out, result)
+          completed++
+          printLine(formatResultLine(opts.out, result))
         } catch (err) {
+          completed++
           failures++
-          console.error(`  ${basename(path)} (${format}): FAILED - ${(err as Error).message}`)
+          printLine(`  ${basename(path)} (${format}): FAILED - ${(err as Error).message}`, true)
         }
       }
     }
@@ -96,29 +133,33 @@ async function main(
 
   if (videos.length > 0) {
     if (opts.skipVideo) {
-      console.log(`\nSkipping ${videos.length} video(s) (--skip-video).`)
-    } else if (!(await hasFfmpeg())) {
-      console.log(
+      printLine(`\nSkipping ${videos.length} video(s) (--skip-video).`)
+    } else if (!ffmpegAvailable) {
+      printLine(
         `\nSkipping ${videos.length} video(s) - ffmpeg not found on PATH.\n` +
           `Install it (e.g. "sudo dnf install ffmpeg" on Fedora, "brew install ffmpeg" on macOS, ` +
           `or from https://ffmpeg.org/download.html) and re-run.`
       )
     } else {
-      console.log(`\nVideo (${videos.length}) -> ${opts.out}/<name>/ (${videoFormats.join(", ")})`)
+      printLine(`\nVideo (${videos.length}) -> ${opts.out}/<name>/ (${videoFormats.join(", ")})`)
       for (const path of videos) {
         const outDir = await fileOutDir(path)
         for (const format of videoFormats) {
           try {
             const result = await optimizeVideo(path, outDir, { ...videoOptions, format })
-            logResult(opts.out, result)
+            completed++
+            printLine(formatResultLine(opts.out, result))
           } catch (err) {
+            completed++
             failures++
-            console.error(`  ${basename(path)} (${format}): FAILED - ${(err as Error).message}`)
+            printLine(`  ${basename(path)} (${format}): FAILED - ${(err as Error).message}`, true)
           }
         }
       }
     }
   }
+
+  clearBar()
 
   if (failures > 0) {
     console.error(`\n${failures} file(s) failed.`)
@@ -128,14 +169,14 @@ async function main(
   console.log(`\nSuccessfully squished into ${opts.out}/!`)
 }
 
-function logResult(
+function formatResultLine(
   outRoot: string,
   result: { inputPath: string; outputPath: string; beforeBytes: number; afterBytes: number }
-) {
-  console.log(
+): string {
+  return (
     `  ${basename(result.inputPath)} -> ${relative(outRoot, result.outputPath)}  ` +
-      `${formatBytes(result.beforeBytes)} -> ${formatBytes(result.afterBytes)} ` +
-      `(${formatSavings(result.beforeBytes, result.afterBytes)})`
+    `${formatBytes(result.beforeBytes)} -> ${formatBytes(result.afterBytes)} ` +
+    `(${formatSavings(result.beforeBytes, result.afterBytes)})`
   )
 }
 

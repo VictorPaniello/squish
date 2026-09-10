@@ -33,7 +33,15 @@ tagged as a release yet, so everything below is under `[Unreleased]`.
   `squished/photo/photo.{webp,avif,jpeg}` instead of a flat folder mixing
   every file and format together. A final `Successfully squished into
   <dir>/!` line prints once processing completes without failures.
-- Test suite: 25 tests across image resizing/format/never-upscale
+- Live progress bar (`formatProgressBar` in `src/progress.ts`, a pure/
+  testable formatter): an install-script style `[####------] 40%
+  (4/10)`, tracking every image/video-format combination across the run,
+  redrawn in place via `\r`. Gated on `process.stdout.isTTY` - piped
+  output, log files, and the test suite's own subprocess capture all
+  fall back to the plain per-file lines that already existed, unchanged,
+  since overwriting the "previous line" is meaningless once nothing is
+  live-rendering it.
+- Test suite: 31 tests across image resizing/format/never-upscale
   behavior, media file discovery, byte-size formatting, video process
   orchestration (a fake `ffmpeg` binary on `PATH`, so process spawning,
   waiting, and error-surfacing are tested deterministically without
@@ -43,8 +51,10 @@ tagged as a release yet, so everything below is under `[Unreleased]`.
   just that the output extension is right), CLI multi-format output for
   both images and video (including whitespace/duplicate handling in
   `--format` and a rejected invalid format), the new per-file subfolder
-  layout, and a real end-to-end CLI smoke test that spawns the actual
-  entrypoint as a subprocess.
+  layout, progress-bar formatting (0%, 100%, partial fill, the
+  divide-by-zero guard, the >100%-completed clamp), and a real
+  end-to-end CLI smoke test that spawns the actual entrypoint as a
+  subprocess.
 - GitHub Actions CI (lint via `oxlint`, typecheck via `tsc`, tests via
   `bun test`).
 - MIT license.

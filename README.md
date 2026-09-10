@@ -142,15 +142,23 @@ squish ./photos
 squish ./photos --out public/photos --max-dimension 2000 --quality 85
 ```
 
+Running in a real terminal shows a live `[#####-----] 40% (4/10)` progress
+bar across every image/video-format combination in the run, updated in
+place. It's automatically skipped (falling back to the plain per-file
+lines only) when output isn't a real terminal - piped to a file, captured
+by a test, running in CI - since carriage-return tricks that overwrite the
+previous line only make sense on a live screen.
+
 ## What it doesn't do (yet)
 
 - Recurse into subdirectories — a flat input folder only.
 - Fuzzy "is this basically the same photo as one already in the output
   folder" dedup — every input file gets processed independently.
-- A progress bar / parallel processing — files are optimized one at a
-  time, in order, which is simple and fine at the scale this is meant for
-  (a folder of photos for a personal site, not a media pipeline processing
-  thousands of files).
+- Parallel processing — files are optimized one at a time, in order,
+  which is simple and fine at the scale this is meant for (a folder of
+  photos for a personal site, not a media pipeline processing thousands
+  of files). There is a progress bar (see below) - it just doesn't make
+  the work itself go faster.
 - A separate CRF flag per video codec — `--video-crf` feeds both `mp4`
   (libx264, ~0-51 scale) and `webm` (libvpx-vp9, ~0-63 scale). The same
   number lands as relatively higher quality (bigger file) on `webm` than
