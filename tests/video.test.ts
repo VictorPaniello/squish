@@ -90,6 +90,64 @@ describe("optimizeVideo", () => {
     expect(args).not.toContain("libx264")
   })
 
+  test("reports real progress parsed from ffmpeg's own -progress output as it encodes", async () => {
+    const input = join(dir, "clip.mov")
+    await writeFile(input, Buffer.alloc(2_000, 1))
+
+    // Mimics the two things optimizeVideo() actually parses: a
+    // "Duration: ..." line on stderr (ffmpeg prints this once, while
+    // opening the input) and repeated "out_time=..." lines on stdout
+    // (from -progress pipe:1, one per encoded chunk). The sleeps between
+    // echoes are needed for the test itself, not for optimizeVideo(): a
+    // real ffmpeg naturally paces its own progress lines a fraction of a
+    // second apart, so each arrives as its own "data" event; a script
+    // that prints all of them instantly can have the OS pipe buffer
+    // coalesce several into one chunk, which optimizeVideo() correctly
+    // collapses down to just the latest (documented in its own code) -
+    // that's real, correct behavior, just not what this test wants to
+    // exercise.
+    await installFakeFfmpeg(`
+      echo "Duration: 00:00:10.00, start: 0.000000, bitrate: 128 kb/s" >&2
+      echo "out_time=00:00:02.500000"
+      echo "progress=continue"
+      sleep 0.05
+      echo "out_time=00:00:05.000000"
+      echo "progress=continue"
+      sleep 0.05
+      for arg; do out="$arg"; done
+      printf 'x%.0s' $(seq 1 200) > "$out"
+    `)
+
+    const ratios: number[] = []
+    const result = await optimizeVideo(input, dir, undefined, (ratio) => ratios.push(ratio))
+
+    expect(result.outputPath.endsWith(".mp4")).toBe(true)
+    // Real numbers parsed from the fake ffmpeg's own output: 2.5s/10s
+    // and 5s/10s, plus the final onProgress(1) fired on a clean exit -
+    // never claiming 100% until the process has actually succeeded.
+    expect(ratios).toContain(0.25)
+    expect(ratios).toContain(0.5)
+    expect(ratios.at(-1)).toBe(1)
+  })
+
+  test("doesn't request progress output from ffmpeg when no onProgress callback is given", async () => {
+    const input = join(dir, "clip.mov")
+    await writeFile(input, Buffer.alloc(1_000, 1))
+
+    const argsLog = join(dir, "args.log")
+    await installFakeFfmpeg(`
+      echo "$@" > "${argsLog}"
+      for arg; do out="$arg"; done
+      printf 'x%.0s' $(seq 1 100) > "$out"
+    `)
+
+    await optimizeVideo(input, dir)
+
+    const args = await Bun.file(argsLog).text()
+    expect(args).not.toContain("-progress")
+    expect(args).not.toContain("-nostats")
+  })
+
   test("surfaces ffmpeg's stderr when it fails", async () => {
     const input = join(dir, "clip.mov")
     await writeFile(input, "not a real video")

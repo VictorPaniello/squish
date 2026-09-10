@@ -70,14 +70,14 @@ async function main(
 
   const ffmpegAvailable = videos.length > 0 && !opts.skipVideo ? await hasFfmpeg() : false
 
-  // An install-script style "[####------] 40%" bar, one per input file
-  // (reset for each new file, not a single bar for the whole run) so it
-  // reads as "how far through *this* file's formats am I" rather than
-  // an opaque run-wide count. Real terminals only - piped/redirected
-  // output (a log file, a test harness capturing stdout, CI) gets the
-  // plain line-per-result output it always had instead: raw \r/ANSI
-  // bytes are meaningless once they're not overwriting anything on a
-  // live screen.
+  // An install-script style "[####------] 40%" bar, one per individual
+  // conversion (one input file into one format) - reset to a fresh bar
+  // for the next format the moment this one finishes, rather than one
+  // bar spanning a whole file's formats or the whole run. Real
+  // terminals only - piped/redirected output (a log file, a test
+  // harness capturing stdout, CI) gets the plain line-per-result output
+  // it always had instead: raw \r/ANSI bytes are meaningless once
+  // they're not overwriting anything on a live screen.
   const useProgressBar = process.stdout.isTTY === true
 
   /** Clears whatever progress bar (if any) is currently drawn on the
@@ -110,36 +110,58 @@ async function main(
     return dir
   }
 
-  /** Processes one file through every requested format, with its own
-   * per-file progress bar (0/total at the start, total/total once every
-   * format for this file is done). Shared between the image and video
-   * loops below - they differ only in which optimize function runs and
-   * which format list drives it. */
+  /** Animates a bar toward 90% on a fixed timer, for a conversion that
+   * has no real intermediate progress signal to report (sharp's own
+   * image encode - see processFile below). This is NOT a measurement:
+   * it never claims completion, and the caller is responsible for
+   * calling stop() and then rendering the real 100% itself once the
+   * actual work has finished - so a fast conversion just jumps straight
+   * from wherever the animation had reached, and a slow one just sits
+   * at 90% until the real result is ready. Documented as simulated in
+   * the README/CHANGELOG so it's never mistaken for a real number. */
+  function simulateProgress(render: (ratio: number) => void, estimatedMs = 150): () => void {
+    const start = Date.now()
+    const timer = setInterval(() => render(Math.min(0.9, (Date.now() - start) / estimatedMs)), 30)
+    return () => clearInterval(timer)
+  }
+
+  /** Processes one file through every requested format, with a fresh
+   * progress bar per individual conversion (one file into one format) -
+   * it resets to 0% the moment the previous format's bar reaches 100%,
+   * rather than tracking progress across the whole file or run. Shared
+   * between the image and video loops below via the `simulate` flag:
+   * video gets real progress from ffmpeg's own reporting (threaded
+   * through as the optimize callback's second argument); images get the
+   * simulated animation above, since sharp has no real signal to give. */
   async function processFile<F extends string>(
     path: string,
-    outDir: string,
     formats: F[],
-    optimize: (format: F) => Promise<{ inputPath: string; outputPath: string; beforeBytes: number; afterBytes: number }>
+    simulate: boolean,
+    optimize: (
+      format: F,
+      onProgress: (ratio: number) => void
+    ) => Promise<{ inputPath: string; outputPath: string; beforeBytes: number; afterBytes: number }>
   ): Promise<void> {
     const label = basename(path)
-    const total = formats.length
-    let completed = 0
 
-    function renderBar() {
-      if (!useProgressBar) return
-      process.stdout.write(`\r\x1b[2K${label} ${formatProgressBar(completed, total)}`)
-    }
-
-    renderBar()
     for (const format of formats) {
+      const convLabel = `${label} -> ${format}`
+      function renderBar(ratio: number) {
+        if (!useProgressBar) return
+        process.stdout.write(`\r\x1b[2K${convLabel} ${formatProgressBar(Math.round(ratio * 100), 100)}`)
+      }
+
+      renderBar(0)
+      const stopSimulation = simulate ? simulateProgress(renderBar) : undefined
       try {
-        const result = await optimize(format)
-        completed++
-        commitLine(formatResultLine(opts.out, result), renderBar)
+        const result = await optimize(format, renderBar)
+        stopSimulation?.()
+        renderBar(1)
+        commitLine(formatResultLine(opts.out, result), () => {})
       } catch (err) {
-        completed++
+        stopSimulation?.()
         failures++
-        commitLine(`  ${label} (${format}): FAILED - ${(err as Error).message}`, renderBar, true)
+        commitLine(`  ${label} (${format}): FAILED - ${(err as Error).message}`, () => {}, true)
       }
     }
   }
@@ -151,7 +173,7 @@ async function main(
     )
     for (const path of images) {
       const outDir = await fileOutDir(path)
-      await processFile(path, outDir, imageFormats, (format) =>
+      await processFile(path, imageFormats, true, (format) =>
         optimizeImage(path, outDir, { ...imageOptions, format })
       )
     }
@@ -174,8 +196,8 @@ async function main(
       )
       for (const path of videos) {
         const outDir = await fileOutDir(path)
-        await processFile(path, outDir, videoFormats, (format) =>
-          optimizeVideo(path, outDir, { ...videoOptions, format })
+        await processFile(path, videoFormats, false, (format, onProgress) =>
+          optimizeVideo(path, outDir, { ...videoOptions, format }, onProgress)
         )
       }
     }

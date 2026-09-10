@@ -146,13 +146,21 @@ squish ./photos
 squish ./photos --out public/photos --max-dimension 2000 --quality 85
 ```
 
-Running in a real terminal shows a live `coastline.jpg [#####-----] 50%
-(1/2)` progress bar - one per input file, resetting to 0% as each new
-file starts, rather than one opaque bar for the whole run. It's
-automatically skipped (falling back to the plain per-file lines only)
-when output isn't a real terminal - piped to a file, captured by a test,
-running in CI - since carriage-return tricks that overwrite the previous
-line only make sense on a live screen.
+Running in a real terminal shows a live `coastline.jpg -> webp
+[#####-----] 50%` progress bar - one per individual conversion (one
+input file into one format), resetting to a fresh bar the moment the
+previous one hits 100%. For **video**, that percentage is real: parsed
+straight from `ffmpeg`'s own progress reporting (encoded time ÷ total
+duration) as it encodes. For **images**, there's no equivalent signal to
+read - `sharp` doesn't expose intermediate progress for a single
+encode, and most images finish in well under a second anyway - so the
+bar there is a bounded animation (eases toward 90% on a timer, then
+jumps to the real 100% the moment the file is actually written), never a
+measurement. It's documented as simulated here so it's never mistaken
+for the real number video gets. Both fall back to the plain per-file
+lines only when output isn't a real terminal - piped to a file, captured
+by a test, running in CI - since carriage-return tricks that overwrite
+the previous line only make sense on a live screen.
 
 ## What it doesn't do (yet)
 
