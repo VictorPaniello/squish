@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 import { mkdir } from "node:fs/promises"
-import { basename } from "node:path"
+import { basename, extname, join, relative } from "node:path"
 import { Command } from "commander"
 import { findMediaFiles } from "./files.ts"
 import { formatBytes, formatSavings } from "./format.ts"
 import { type ImageFormat, optimizeImage } from "./images.ts"
-import { hasFfmpeg, optimizeVideo } from "./video.ts"
+import { hasFfmpeg, optimizeVideo, type VideoFormat } from "./video.ts"
 
 const program = new Command()
 
@@ -22,10 +22,11 @@ program
   .option(
     "--format <list>",
     "comma-separated output image format(s): webp,avif,jpeg,png",
-    "webp,jpeg"
+    "webp,avif,jpeg"
   )
   .option("--video-crf <n>", "video quality - lower is higher quality, bigger file", "23")
   .option("--video-max-height <px>", "max video height", "1080")
+  .option("--video-format <list>", "comma-separated output video format(s): mp4,webm", "mp4,webm")
   .option("--skip-video", "skip video files entirely, even if ffmpeg is available", false)
   .action(main)
 
@@ -40,6 +41,7 @@ async function main(
     format: string
     videoCrf: string
     videoMaxHeight: string
+    videoFormat: string
     skipVideo: boolean
   }
 ) {
@@ -48,6 +50,7 @@ async function main(
     maxDimension: parseIntArg(opts.maxDimension, "--max-dimension"),
     quality: parseIntArg(opts.quality, "--quality"),
   }
+  const videoFormats = parseVideoFormats(opts.videoFormat)
   const videoOptions = {
     crf: parseIntArg(opts.videoCrf, "--video-crf"),
     maxHeight: parseIntArg(opts.videoMaxHeight, "--video-max-height"),
@@ -63,13 +66,26 @@ async function main(
 
   let failures = 0
 
+  // Every input file gets its own subfolder under opts.out, named after
+  // the file (without its original extension), holding every requested
+  // output format side by side - so "coastline.jpg" becomes
+  // "squished/coastline/coastline.{webp,avif,jpeg,png}" rather than one
+  // flat folder mixing formats and files together.
+  async function fileOutDir(path: string): Promise<string> {
+    const name = basename(path, extname(path))
+    const dir = join(opts.out, name)
+    await mkdir(dir, { recursive: true })
+    return dir
+  }
+
   if (images.length > 0) {
-    console.log(`Images (${images.length}) -> ${opts.out}/ (${imageFormats.join(", ")})`)
+    console.log(`Images (${images.length}) -> ${opts.out}/<name>/ (${imageFormats.join(", ")})`)
     for (const path of images) {
+      const outDir = await fileOutDir(path)
       for (const format of imageFormats) {
         try {
-          const result = await optimizeImage(path, opts.out, { ...imageOptions, format })
-          logResult(result)
+          const result = await optimizeImage(path, outDir, { ...imageOptions, format })
+          logResult(opts.out, result)
         } catch (err) {
           failures++
           console.error(`  ${basename(path)} (${format}): FAILED - ${(err as Error).message}`)
@@ -88,14 +104,17 @@ async function main(
           `or from https://ffmpeg.org/download.html) and re-run.`
       )
     } else {
-      console.log(`\nVideo (${videos.length}) -> ${opts.out}/`)
+      console.log(`\nVideo (${videos.length}) -> ${opts.out}/<name>/ (${videoFormats.join(", ")})`)
       for (const path of videos) {
-        try {
-          const result = await optimizeVideo(path, opts.out, videoOptions)
-          logResult(result)
-        } catch (err) {
-          failures++
-          console.error(`  ${basename(path)}: FAILED - ${(err as Error).message}`)
+        const outDir = await fileOutDir(path)
+        for (const format of videoFormats) {
+          try {
+            const result = await optimizeVideo(path, outDir, { ...videoOptions, format })
+            logResult(opts.out, result)
+          } catch (err) {
+            failures++
+            console.error(`  ${basename(path)} (${format}): FAILED - ${(err as Error).message}`)
+          }
         }
       }
     }
@@ -105,11 +124,16 @@ async function main(
     console.error(`\n${failures} file(s) failed.`)
     process.exit(1)
   }
+
+  console.log(`\nSuccessfully squished into ${opts.out}/!`)
 }
 
-function logResult(result: { inputPath: string; outputPath: string; beforeBytes: number; afterBytes: number }) {
+function logResult(
+  outRoot: string,
+  result: { inputPath: string; outputPath: string; beforeBytes: number; afterBytes: number }
+) {
   console.log(
-    `  ${basename(result.inputPath)} -> ${basename(result.outputPath)}  ` +
+    `  ${basename(result.inputPath)} -> ${relative(outRoot, result.outputPath)}  ` +
       `${formatBytes(result.beforeBytes)} -> ${formatBytes(result.afterBytes)} ` +
       `(${formatSavings(result.beforeBytes, result.afterBytes)})`
   )
@@ -128,25 +152,33 @@ function parseIntArg(value: string, flag: string): number {
  * whitespace around each entry (a space after the comma is a natural
  * thing to type) and drops duplicates (so "webp,webp" doesn't produce
  * the same file twice), but preserves the order given, since that's
- * also the order results print in. */
-function parseImageFormats(value: string): ImageFormat[] {
-  const valid: ImageFormat[] = ["webp", "avif", "jpeg", "png"]
+ * also the order results print in. Shared by --format and
+ * --video-format, parameterized over each flag's valid values. */
+function parseFormatList<T extends string>(value: string, flag: string, valid: readonly T[]): T[] {
   const requested = value
     .split(",")
     .map((f) => f.trim())
     .filter((f) => f.length > 0)
 
   if (requested.length === 0) {
-    console.error(`Invalid --format: "${value}" (expected at least one of ${valid.join(", ")})`)
+    console.error(`Invalid ${flag}: "${value}" (expected at least one of ${valid.join(", ")})`)
     process.exit(1)
   }
 
   for (const format of requested) {
-    if (!valid.includes(format as ImageFormat)) {
-      console.error(`Invalid --format: "${format}" (expected one of ${valid.join(", ")})`)
+    if (!valid.includes(format as T)) {
+      console.error(`Invalid ${flag}: "${format}" (expected one of ${valid.join(", ")})`)
       process.exit(1)
     }
   }
 
-  return [...new Set(requested)] as ImageFormat[]
+  return [...new Set(requested)] as T[]
+}
+
+function parseImageFormats(value: string): ImageFormat[] {
+  return parseFormatList(value, "--format", ["webp", "avif", "jpeg", "png"] as const)
+}
+
+function parseVideoFormats(value: string): VideoFormat[] {
+  return parseFormatList(value, "--video-format", ["mp4", "webm"] as const)
 }

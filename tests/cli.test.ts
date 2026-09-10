@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, readdir, rm } from "node:fs/promises"
+import { chmod, mkdtemp, readdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import sharp from "sharp"
@@ -9,7 +9,7 @@ import sharp from "sharp"
 // also exercises argument parsing and the file-discovery/orchestration
 // wiring in cli.ts that the per-module unit tests don't touch.
 describe("squish CLI", () => {
-  test("optimizes a directory of images end to end, producing the default webp+jpeg pair", async () => {
+  test("optimizes a directory of images end to end, producing the default webp+avif+jpeg trio in a per-file subfolder", async () => {
     const dir = await mkdtemp(join(tmpdir(), "squish-cli-"))
     try {
       const raw = Buffer.alloc(2000 * 1500 * 3)
@@ -27,10 +27,13 @@ describe("squish CLI", () => {
 
       expect(exitCode).toBe(0)
 
-      const produced = await readdir(outDir)
-      expect(produced.sort()).toEqual(["photo.jpeg", "photo.webp"])
+      // One subfolder per input file, named after it (without extension).
+      expect(await readdir(outDir)).toEqual(["photo"])
 
-      const meta = await sharp(join(outDir, "photo.webp")).metadata()
+      const produced = await readdir(join(outDir, "photo"))
+      expect(produced.sort()).toEqual(["photo.avif", "photo.jpeg", "photo.webp"])
+
+      const meta = await sharp(join(outDir, "photo", "photo.webp")).metadata()
       expect(Math.max(meta.width!, meta.height!)).toBeLessThanOrEqual(500)
     } finally {
       await rm(dir, { recursive: true, force: true })
@@ -67,8 +70,49 @@ describe("squish CLI", () => {
 
       expect(exitCode).toBe(0)
 
-      const produced = await readdir(outDir)
+      const produced = await readdir(join(outDir, "photo"))
       expect(produced.sort()).toEqual(["photo.avif", "photo.jpeg", "photo.webp"])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  test("--video-format accepts a comma-separated list and produces one file per format, in the file's subfolder", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "squish-cli-video-multiformat-"))
+    try {
+      // A fake ffmpeg on PATH: the CLI test suite doesn't depend on
+      // ffmpeg being installed (it isn't, in this sandbox) or on real
+      // encoding correctness, which is ffmpeg's own concern - see
+      // video.test.ts for the same pattern applied directly. Unlike
+      // video.test.ts's version, this one goes through the real CLI,
+      // which calls hasFfmpeg() first (`ffmpeg -version`, no output
+      // path) before ever encoding - the "grab the last arg as an
+      // output path" trick must not fire for that call, or it writes a
+      // stray file named "-version" into the process's cwd.
+      const binDir = join(dir, "bin")
+      await Bun.write(
+        join(binDir, "ffmpeg"),
+        `#!/bin/sh\n` +
+          `if [ "$1" = "-version" ]; then exit 0; fi\n` +
+          `for arg; do out="$arg"; done\n` +
+          `printf 'x%.0s' $(seq 1 100) > "$out"\n`
+      )
+      await chmod(join(binDir, "ffmpeg"), 0o755)
+
+      const inputDir = join(dir, "input")
+      await Bun.write(join(inputDir, "clip.mp4"), Buffer.alloc(1000, 1))
+
+      const outDir = join(dir, "out")
+      const proc = Bun.spawn(
+        ["bun", "run", join(import.meta.dir, "../src/cli.ts"), inputDir, "--out", outDir],
+        { stdout: "pipe", stderr: "pipe", env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` } }
+      )
+      const exitCode = await proc.exited
+
+      expect(exitCode).toBe(0)
+
+      const produced = await readdir(join(outDir, "clip"))
+      expect(produced.sort()).toEqual(["clip.mp4", "clip.webm"])
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

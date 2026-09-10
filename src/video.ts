@@ -3,20 +3,29 @@ import { stat } from "node:fs/promises"
 import { basename, extname, join } from "node:path"
 import type { OptimizeResult } from "./images.ts"
 
+export type VideoFormat = "mp4" | "webm"
+
 export type VideoOptions = {
-  /** libx264 CRF - lower is higher quality/bigger file. 23 is x264's
-   * own documented "visually lossless for most content" default; going
-   * lower than ~18 stops paying off in any way a viewer would notice. */
+  /** Quality knob shared across both codecs - lower is higher
+   * quality/bigger file. Note the two codecs don't share a CRF scale:
+   * libx264 (mp4) runs roughly 0-51 and 23 is its own documented
+   * "visually lossless for most content" default, while libvpx-vp9
+   * (webm) runs roughly 0-63, so the same number lands as *higher*
+   * relative quality (bigger file) on webm than on mp4. Reusing one
+   * flag keeps the CLI simple; it's a documented trade-off, not a bug -
+   * see CHANGELOG. */
   crf: number
   /** Caps the output's height; width scales to preserve aspect ratio.
    * A phone/camera's 4K export is far more resolution than this site
    * will ever display a video at. */
   maxHeight: number
+  format: VideoFormat
 }
 
 export const DEFAULT_VIDEO_OPTIONS: VideoOptions = {
   crf: 23,
   maxHeight: 1080,
+  format: "mp4",
 }
 
 /** Whether ffmpeg is on PATH - checked once up front rather than just
@@ -37,35 +46,48 @@ export async function optimizeVideo(
   options: VideoOptions = DEFAULT_VIDEO_OPTIONS
 ): Promise<OptimizeResult> {
   const name = basename(inputPath, extname(inputPath))
-  const outputPath = join(outDir, `${name}.mp4`)
+  const outputPath = join(outDir, `${name}.${options.format}`)
 
-  await runFfmpeg([
-    "-y",
-    "-i",
-    inputPath,
-    // "min(maxHeight,ih)" leaves a source that's already shorter than
-    // maxHeight untouched instead of upscaling it - same
-    // never-enlarge principle as images.ts's withoutEnlargement.
-    "-vf",
-    `scale=-2:'min(${options.maxHeight},ih)'`,
-    "-c:v",
-    "libx264",
-    "-crf",
-    String(options.crf),
-    "-preset",
-    "slow",
-    "-c:a",
-    "aac",
-    "-b:a",
-    "128k",
-    // Moves the moov atom to the front of the file, so a browser can
-    // start playback before the whole file has downloaded - without
-    // it, ffmpeg's default placement makes every web video wait for a
-    // full download first regardless of how small the file is.
-    "-movflags",
-    "+faststart",
-    outputPath,
-  ])
+  // "min(maxHeight,ih)" leaves a source that's already shorter than
+  // maxHeight untouched instead of upscaling it - same never-enlarge
+  // principle as images.ts's withoutEnlargement. Shared by both formats.
+  const scaleArgs = ["-vf", `scale=-2:'min(${options.maxHeight},ih)'`]
+
+  const codecArgs =
+    options.format === "mp4"
+      ? [
+          "-c:v",
+          "libx264",
+          "-crf",
+          String(options.crf),
+          "-preset",
+          "slow",
+          "-c:a",
+          "aac",
+          "-b:a",
+          "128k",
+          // Moves the moov atom to the front of the file, so a browser
+          // can start playback before the whole file has downloaded -
+          // mp4-specific, libwebm has no equivalent flag.
+          "-movflags",
+          "+faststart",
+        ]
+      : [
+          "-c:v",
+          "libvpx-vp9",
+          "-crf",
+          String(options.crf),
+          // Constant-quality mode - required alongside -crf for VP9,
+          // otherwise ffmpeg defaults to a target bitrate instead.
+          "-b:v",
+          "0",
+          "-c:a",
+          "libopus",
+          "-b:a",
+          "128k",
+        ]
+
+  await runFfmpeg(["-y", "-i", inputPath, ...scaleArgs, ...codecArgs, outputPath])
 
   const [before, after] = await Promise.all([stat(inputPath), stat(outputPath)])
   return { inputPath, outputPath, beforeBytes: before.size, afterBytes: after.size }

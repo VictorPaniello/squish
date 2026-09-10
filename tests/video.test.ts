@@ -65,6 +65,31 @@ describe("optimizeVideo", () => {
     expect(result.afterBytes).toBe(1000)
   })
 
+  test("writes a .webm file and uses the vp9/opus codec args when format is webm", async () => {
+    const input = join(dir, "clip.mov")
+    await writeFile(input, Buffer.alloc(5_000, 1))
+
+    // Captures the args it was invoked with (into a file, since the fake
+    // ffmpeg's own stdout isn't easily inspected after the fact) so the
+    // test can assert on the real codec selection, not just the output
+    // extension - a wrong codec with a right extension would still pass
+    // an extension-only check.
+    const argsLog = join(dir, "args.log")
+    await installFakeFfmpeg(`
+      echo "$@" > "${argsLog}"
+      for arg; do out="$arg"; done
+      printf 'x%.0s' $(seq 1 500) > "$out"
+    `)
+
+    const result = await optimizeVideo(input, dir, { crf: 30, maxHeight: 720, format: "webm" })
+
+    expect(result.outputPath.endsWith(".webm")).toBe(true)
+    const args = await Bun.file(argsLog).text()
+    expect(args).toContain("libvpx-vp9")
+    expect(args).toContain("libopus")
+    expect(args).not.toContain("libx264")
+  })
+
   test("surfaces ffmpeg's stderr when it fails", async () => {
     const input = join(dir, "clip.mov")
     await writeFile(input, "not a real video")
