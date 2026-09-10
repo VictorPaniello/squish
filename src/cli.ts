@@ -19,7 +19,11 @@ program
   .option("-o, --out <dir>", "output directory", "./squished")
   .option("--max-dimension <px>", "max image dimension (longest edge)", "2400")
   .option("--quality <0-100>", "image quality", "82")
-  .option("--format <webp|avif|jpeg|png>", "output image format", "webp")
+  .option(
+    "--format <list>",
+    "comma-separated output image format(s): webp,avif,jpeg,png",
+    "webp,jpeg"
+  )
   .option("--video-crf <n>", "video quality - lower is higher quality, bigger file", "23")
   .option("--video-max-height <px>", "max video height", "1080")
   .option("--skip-video", "skip video files entirely, even if ffmpeg is available", false)
@@ -39,10 +43,10 @@ async function main(
     skipVideo: boolean
   }
 ) {
+  const imageFormats = parseImageFormats(opts.format)
   const imageOptions = {
     maxDimension: parseIntArg(opts.maxDimension, "--max-dimension"),
     quality: parseIntArg(opts.quality, "--quality"),
-    format: parseImageFormat(opts.format),
   }
   const videoOptions = {
     crf: parseIntArg(opts.videoCrf, "--video-crf"),
@@ -60,14 +64,16 @@ async function main(
   let failures = 0
 
   if (images.length > 0) {
-    console.log(`Images (${images.length}) -> ${opts.out}/`)
+    console.log(`Images (${images.length}) -> ${opts.out}/ (${imageFormats.join(", ")})`)
     for (const path of images) {
-      try {
-        const result = await optimizeImage(path, opts.out, imageOptions)
-        logResult(result)
-      } catch (err) {
-        failures++
-        console.error(`  ${basename(path)}: FAILED - ${(err as Error).message}`)
+      for (const format of imageFormats) {
+        try {
+          const result = await optimizeImage(path, opts.out, { ...imageOptions, format })
+          logResult(result)
+        } catch (err) {
+          failures++
+          console.error(`  ${basename(path)} (${format}): FAILED - ${(err as Error).message}`)
+        }
       }
     }
   }
@@ -118,11 +124,29 @@ function parseIntArg(value: string, flag: string): number {
   return n
 }
 
-function parseImageFormat(value: string): ImageFormat {
+/** Splits "webp,avif , jpeg" into ["webp", "avif", "jpeg"] - trims
+ * whitespace around each entry (a space after the comma is a natural
+ * thing to type) and drops duplicates (so "webp,webp" doesn't produce
+ * the same file twice), but preserves the order given, since that's
+ * also the order results print in. */
+function parseImageFormats(value: string): ImageFormat[] {
   const valid: ImageFormat[] = ["webp", "avif", "jpeg", "png"]
-  if (!valid.includes(value as ImageFormat)) {
-    console.error(`Invalid --format: "${value}" (expected one of ${valid.join(", ")})`)
+  const requested = value
+    .split(",")
+    .map((f) => f.trim())
+    .filter((f) => f.length > 0)
+
+  if (requested.length === 0) {
+    console.error(`Invalid --format: "${value}" (expected at least one of ${valid.join(", ")})`)
     process.exit(1)
   }
-  return value as ImageFormat
+
+  for (const format of requested) {
+    if (!valid.includes(format as ImageFormat)) {
+      console.error(`Invalid --format: "${format}" (expected one of ${valid.join(", ")})`)
+      process.exit(1)
+    }
+  }
+
+  return [...new Set(requested)] as ImageFormat[]
 }

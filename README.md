@@ -14,7 +14,8 @@ scale past a handful of files, and it's exactly the kind of repetitive step
 that should be a script instead of a habit.
 
 `squish` does that step generically: point it at a file or a folder, it
-caps every image to a sane maximum dimension, re-encodes it as WebP at a
+caps every image to a sane maximum dimension, re-encodes it as WebP and
+JPEG by default (or any mix of WebP/AVIF/JPEG/PNG you ask for) at a
 quality setting that's visually indistinguishable from the source, and
 strips the metadata — video gets the equivalent treatment via `ffmpeg`
 (H.264, capped resolution, `faststart` so playback can begin before the
@@ -33,14 +34,19 @@ squish examples/coastline.jpg
 ```
 
 ```
-coastline.jpg -> coastline.webp  241KB -> 144KB (-41%)
+Images (1) -> squished/ (webp, jpeg)
+  coastline.jpg -> coastline.webp  241KB -> 144KB (-41%)
+  coastline.jpg -> coastline.jpeg  241KB -> 209KB (-13%)
 ```
 
-A more modest number than the others below, on purpose to show it honestly:
-this file was already a web-sized, already-compressed JPEG (2000px), not a
-fresh camera export - and `squish` still finds real savings on top of that.
-Three more, JPEG, 1-1.1MB each - a normal camera-sized export, the common
-case:
+Default output is both WebP and JPEG - a `<picture>` element can serve the
+smaller WebP to browsers that support it and fall back to the JPEG for the
+rest, without a second tool run. The WebP number is more modest than the
+others below, on purpose, to show it honestly: this file was already a
+web-sized, already-compressed JPEG (2000px), not a fresh camera export -
+and `squish` still finds real savings on top of that. Three more (WebP
+only, `--format webp`), JPEG, 1-1.1MB each - a normal camera-sized export,
+the common case:
 
 ```
 Images (3) -> out/
@@ -103,7 +109,9 @@ squish ./photos
   — plenty for any screen this is likely to be viewed on. Never upscales a
   source that's already smaller.
 - `--quality <0-100>` — image quality. Defaults to `82`.
-- `--format <webp|avif|jpeg|png>` — output image format. Defaults to `webp`.
+- `--format <list>` — comma-separated output image format(s), any mix of
+  `webp`, `avif`, `jpeg`, `png`. One file per requested format, per image.
+  Defaults to `webp,jpeg`.
 - `--video-crf <n>` — video quality (libx264 CRF, lower = higher quality,
   bigger file). Defaults to `23`, x264's own documented "visually lossless
   for most content" default.

@@ -15,14 +15,19 @@ tagged as a release yet, so everything below is under `[Unreleased]`.
   installed, rather than failing).
 - `squish` CLI (Commander): resizes/re-encodes every image and video in a
   file or directory, prints a per-file before/after size and percentage
-  saved.
-- Test suite: 21 tests across image resizing/format/never-upscale
+  saved. `--format` takes a comma-separated list (`webp,avif,jpeg,png`,
+  default `webp,jpeg`) and writes one file per requested format per
+  image, so a single run can produce everything a `<picture>` element
+  needs instead of running the tool once per format.
+- Test suite: 23 tests across image resizing/format/never-upscale
   behavior, media file discovery, byte-size formatting, video process
   orchestration (a fake `ffmpeg` binary on `PATH`, so process spawning,
   waiting, and error-surfacing are tested deterministically without
   depending on ffmpeg actually being installed or on real video encoding
-  correctness, which is ffmpeg's own concern), and a real end-to-end CLI
-  smoke test that spawns the actual entrypoint as a subprocess.
+  correctness, which is ffmpeg's own concern), CLI multi-format output
+  (including whitespace/duplicate handling in `--format` and a rejected
+  invalid format), and a real end-to-end CLI smoke test that spawns the
+  actual entrypoint as a subprocess.
 - GitHub Actions CI (lint via `oxlint`, typecheck via `tsc`, tests via
   `bun test`).
 - MIT license.
