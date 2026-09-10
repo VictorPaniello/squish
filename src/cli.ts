@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { mkdir } from "node:fs/promises"
+import { homedir } from "node:os"
 import { basename, extname, join, relative } from "node:path"
 import { Command } from "commander"
 import { findMediaFiles } from "./files.ts"
@@ -7,6 +8,8 @@ import { formatBytes, formatSavings } from "./format.ts"
 import { type ImageFormat, optimizeImage } from "./images.ts"
 import { formatProgressBar } from "./progress.ts"
 import { hasFfmpeg, optimizeVideo, type VideoFormat } from "./video.ts"
+
+const DEFAULT_OUT_DIR = join(homedir(), "squished")
 
 const program = new Command()
 
@@ -17,7 +20,7 @@ program
   )
   .version("1.0.0")
   .argument("<input>", "an image/video file, or a directory of them (not recursive)")
-  .option("-o, --out <dir>", "output directory", "./squished")
+  .option("-o, --out <dir>", "output directory", DEFAULT_OUT_DIR)
   .option("--max-dimension <px>", "max image dimension (longest edge)", "2400")
   .option("--quality <0-100>", "image quality", "82")
   .option(
@@ -65,38 +68,32 @@ async function main(
 
   await mkdir(opts.out, { recursive: true })
 
-  // Checked once up front (rather than inside the video branch below)
-  // so it can also feed totalUnits here, without spawning a second
-  // "ffmpeg -version" just to ask the same question twice.
   const ffmpegAvailable = videos.length > 0 && !opts.skipVideo ? await hasFfmpeg() : false
-  const willProcessVideo = videos.length > 0 && !opts.skipVideo && ffmpegAvailable
 
-  const totalUnits = images.length * imageFormats.length + (willProcessVideo ? videos.length * videoFormats.length : 0)
-  // An install-script style "[####------] 40%" bar, updated in place via
-  // carriage returns - real terminals only. Piped/redirected output (a
-  // log file, a test harness capturing stdout, CI) gets the plain
-  // line-per-result output it always had instead: raw \r/ANSI bytes are
-  // meaningless once they're not overwriting anything on a live screen.
-  const useProgressBar = totalUnits > 0 && process.stdout.isTTY === true
-  let completed = 0
+  // An install-script style "[####------] 40%" bar, one per input file
+  // (reset for each new file, not a single bar for the whole run) so it
+  // reads as "how far through *this* file's formats am I" rather than
+  // an opaque run-wide count. Real terminals only - piped/redirected
+  // output (a log file, a test harness capturing stdout, CI) gets the
+  // plain line-per-result output it always had instead: raw \r/ANSI
+  // bytes are meaningless once they're not overwriting anything on a
+  // live screen.
+  const useProgressBar = process.stdout.isTTY === true
 
-  function renderBar() {
-    if (!useProgressBar) return
-    process.stdout.write(`\r\x1b[2K${formatProgressBar(completed, totalUnits)}`)
-  }
-
-  /** Prints a line that stays in the scrollback, then redraws the
-   * progress bar underneath it (if enabled) so the bar always ends up
-   * on the last line rather than getting interleaved with real output. */
-  function printLine(text: string, toStderr = false) {
-    const write = toStderr ? console.error : console.log
-    if (useProgressBar) process.stdout.write("\r\x1b[2K")
-    write(text)
-    renderBar()
-  }
-
+  /** Clears whatever progress bar (if any) is currently drawn on the
+   * last line - safe to call even when nothing has been drawn yet. */
   function clearBar() {
     if (useProgressBar) process.stdout.write("\r\x1b[2K")
+  }
+
+  /** Prints a line that stays in the scrollback, then redraws the given
+   * file's progress bar underneath it, so the bar always ends up back
+   * on the last line rather than getting interleaved with real output. */
+  function commitLine(text: string, renderBar: () => void, toStderr = false) {
+    const write = toStderr ? console.error : console.log
+    clearBar()
+    write(text)
+    renderBar()
   }
 
   let failures = 0
@@ -113,48 +110,73 @@ async function main(
     return dir
   }
 
+  /** Processes one file through every requested format, with its own
+   * per-file progress bar (0/total at the start, total/total once every
+   * format for this file is done). Shared between the image and video
+   * loops below - they differ only in which optimize function runs and
+   * which format list drives it. */
+  async function processFile<F extends string>(
+    path: string,
+    outDir: string,
+    formats: F[],
+    optimize: (format: F) => Promise<{ inputPath: string; outputPath: string; beforeBytes: number; afterBytes: number }>
+  ): Promise<void> {
+    const label = basename(path)
+    const total = formats.length
+    let completed = 0
+
+    function renderBar() {
+      if (!useProgressBar) return
+      process.stdout.write(`\r\x1b[2K${label} ${formatProgressBar(completed, total)}`)
+    }
+
+    renderBar()
+    for (const format of formats) {
+      try {
+        const result = await optimize(format)
+        completed++
+        commitLine(formatResultLine(opts.out, result), renderBar)
+      } catch (err) {
+        completed++
+        failures++
+        commitLine(`  ${label} (${format}): FAILED - ${(err as Error).message}`, renderBar, true)
+      }
+    }
+  }
+
   if (images.length > 0) {
-    printLine(`Images (${images.length}) -> ${opts.out}/<name>/ (${imageFormats.join(", ")})`)
+    commitLine(
+      `Images (${images.length}) -> ${opts.out}/<name>/ (${imageFormats.join(", ")})`,
+      () => {}
+    )
     for (const path of images) {
       const outDir = await fileOutDir(path)
-      for (const format of imageFormats) {
-        try {
-          const result = await optimizeImage(path, outDir, { ...imageOptions, format })
-          completed++
-          printLine(formatResultLine(opts.out, result))
-        } catch (err) {
-          completed++
-          failures++
-          printLine(`  ${basename(path)} (${format}): FAILED - ${(err as Error).message}`, true)
-        }
-      }
+      await processFile(path, outDir, imageFormats, (format) =>
+        optimizeImage(path, outDir, { ...imageOptions, format })
+      )
     }
   }
 
   if (videos.length > 0) {
     if (opts.skipVideo) {
-      printLine(`\nSkipping ${videos.length} video(s) (--skip-video).`)
+      commitLine(`\nSkipping ${videos.length} video(s) (--skip-video).`, () => {})
     } else if (!ffmpegAvailable) {
-      printLine(
+      commitLine(
         `\nSkipping ${videos.length} video(s) - ffmpeg not found on PATH.\n` +
           `Install it (e.g. "sudo dnf install ffmpeg" on Fedora, "brew install ffmpeg" on macOS, ` +
-          `or from https://ffmpeg.org/download.html) and re-run.`
+          `or from https://ffmpeg.org/download.html) and re-run.`,
+        () => {}
       )
     } else {
-      printLine(`\nVideo (${videos.length}) -> ${opts.out}/<name>/ (${videoFormats.join(", ")})`)
+      commitLine(
+        `\nVideo (${videos.length}) -> ${opts.out}/<name>/ (${videoFormats.join(", ")})`,
+        () => {}
+      )
       for (const path of videos) {
         const outDir = await fileOutDir(path)
-        for (const format of videoFormats) {
-          try {
-            const result = await optimizeVideo(path, outDir, { ...videoOptions, format })
-            completed++
-            printLine(formatResultLine(opts.out, result))
-          } catch (err) {
-            completed++
-            failures++
-            printLine(`  ${basename(path)} (${format}): FAILED - ${(err as Error).message}`, true)
-          }
-        }
+        await processFile(path, outDir, videoFormats, (format) =>
+          optimizeVideo(path, outDir, { ...videoOptions, format })
+        )
       }
     }
   }

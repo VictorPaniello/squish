@@ -33,14 +33,18 @@ tagged as a release yet, so everything below is under `[Unreleased]`.
   `squished/photo/photo.{webp,avif,jpeg}` instead of a flat folder mixing
   every file and format together. A final `Successfully squished into
   <dir>/!` line prints once processing completes without failures.
+  `--out` now defaults to `~/squished` (the invoking user's home
+  directory) instead of `./squished` relative to the current working
+  directory, so running `squish` from anywhere lands in the same
+  predictable place.
 - Live progress bar (`formatProgressBar` in `src/progress.ts`, a pure/
   testable formatter): an install-script style `[####------] 40%
-  (4/10)`, tracking every image/video-format combination across the run,
-  redrawn in place via `\r`. Gated on `process.stdout.isTTY` - piped
-  output, log files, and the test suite's own subprocess capture all
-  fall back to the plain per-file lines that already existed, unchanged,
-  since overwriting the "previous line" is meaningless once nothing is
-  live-rendering it.
+  (4/10)`, one per input file - resetting to 0% as each new file starts
+  rather than one bar spanning the whole run - redrawn in place via `\r`.
+  Gated on `process.stdout.isTTY` - piped output, log files, and the
+  test suite's own subprocess capture all fall back to the plain
+  per-file lines that already existed, unchanged, since overwriting the
+  "previous line" is meaningless once nothing is live-rendering it.
 - Test suite: 31 tests across image resizing/format/never-upscale
   behavior, media file discovery, byte-size formatting, video process
   orchestration (a fake `ffmpeg` binary on `PATH`, so process spawning,

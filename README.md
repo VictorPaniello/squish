@@ -20,8 +20,9 @@ quality setting that's visually indistinguishable from the source, and
 strips the metadata — video gets the equivalent treatment via `ffmpeg`,
 re-encoded as MP4 (H.264/AAC) and WebM (VP9/Opus) by default, both with
 capped resolution, if `ffmpeg` is installed. Every input file gets its
-own subfolder under the output directory, holding every requested format
-side by side — so `photo.jpg` becomes `squished/photo/photo.{webp,avif,jpeg}`.
+own subfolder under `~/squished` (your home directory, by default - see
+`--out` below), holding every requested format side by side — so
+`photo.jpg` becomes `~/squished/photo/photo.{webp,avif,jpeg}`.
 
 **Real results**, not made-up numbers - `examples/coastline.jpg`, a real
 photo:
@@ -31,12 +32,12 @@ squish examples/coastline.jpg
 ```
 
 ```
-Images (1) -> squished/<name>/ (webp, avif, jpeg)
+Images (1) -> /home/you/squished/<name>/ (webp, avif, jpeg)
   coastline.jpg -> coastline/coastline.webp  241KB -> 144KB (-41%)
   coastline.jpg -> coastline/coastline.avif  241KB -> 200KB (-17%)
   coastline.jpg -> coastline/coastline.jpeg  241KB -> 209KB (-13%)
 
-Successfully squished into squished/!
+Successfully squished into /home/you/squished/!
 ```
 
 Default output is WebP, AVIF, and JPEG, one subfolder per input file
@@ -110,9 +111,12 @@ squish ./photos
 
 - `<input>` (positional, required) — a single file or a directory of files
   (not recursive - a flat folder of exports is the common case).
-- `--out, -o <dir>` — output directory. Defaults to `./squished`. Every
-  input file gets its own subfolder here, named after it (without its
-  original extension) - `photo.jpg` becomes `<out>/photo/photo.{...}`, so
+- `--out, -o <dir>` — output directory. Defaults to `~/squished`
+  (your home directory), so running `squish` from anywhere always lands
+  in the same predictable place instead of scattering a `squished/`
+  folder into whatever directory you happened to be in. Every input file
+  gets its own subfolder here, named after it (without its original
+  extension) - `photo.jpg` becomes `<out>/photo/photo.{...}`, so
   requesting several formats for several files never mixes them together
   in one flat folder.
 - `--max-dimension <px>` — longest edge after resizing. Defaults to `2400`
@@ -142,12 +146,13 @@ squish ./photos
 squish ./photos --out public/photos --max-dimension 2000 --quality 85
 ```
 
-Running in a real terminal shows a live `[#####-----] 40% (4/10)` progress
-bar across every image/video-format combination in the run, updated in
-place. It's automatically skipped (falling back to the plain per-file
-lines only) when output isn't a real terminal - piped to a file, captured
-by a test, running in CI - since carriage-return tricks that overwrite the
-previous line only make sense on a live screen.
+Running in a real terminal shows a live `coastline.jpg [#####-----] 50%
+(1/2)` progress bar - one per input file, resetting to 0% as each new
+file starts, rather than one opaque bar for the whole run. It's
+automatically skipped (falling back to the plain per-file lines only)
+when output isn't a real terminal - piped to a file, captured by a test,
+running in CI - since carriage-return tricks that overwrite the previous
+line only make sense on a live screen.
 
 ## What it doesn't do (yet)
 
