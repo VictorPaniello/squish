@@ -1,0 +1,32 @@
+{
+  "name": "squish",
+  "version": "1.0.0",
+  "description": "Resize and re-encode photos (and video, via ffmpeg) for the web - smaller files, no visible quality loss.",
+  "license": "MIT",
+  "author": "Victor Paniello",
+  "repository": "github:VictorPaniello/squish",
+  "type": "module",
+  "bin": {
+    "squish": "./src/cli.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "start": "bun run src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "oxlint": "^1.82.0"
+  },
+  "peerDependencies": {
+    "typescript": "^7"
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "sharp": "^0.35.4"
+  }
+}
