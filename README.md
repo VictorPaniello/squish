@@ -23,11 +23,6 @@ capped resolution, if `ffmpeg` is installed. Every input file gets its
 own subfolder under the output directory, holding every requested format
 side by side — so `photo.jpg` becomes `squished/photo/photo.{webp,avif,jpeg}`.
 
-Built while preparing for Forward Deployed Engineer roles, using
-[Claude Code](https://claude.com/claude-code) as a pair-programmer, for the
-same reason as [tidycsv](https://github.com/VictorPaniello/tidycsv): a
-concrete "yes, I've actually done this" rather than just describing it.
-
 **Real results**, not made-up numbers - `examples/coastline.jpg`, a real
 photo:
 
