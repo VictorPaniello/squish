@@ -1,4 +1,4 @@
-# squish
+![squish](.github/banner.svg)
 
 A CLI that resizes and re-encodes photos (and video, via `ffmpeg`) for the
 web — smaller files, no visible quality loss.

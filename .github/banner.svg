@@ -1,0 +1,60 @@
+<svg viewBox="0 0 1200 300" width="1200" height="300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="squish: big photos and video, squished down for the web">
+  <defs>
+    <style>
+      .wordmark { font-family: ui-rounded, "SF Pro Rounded", "Segoe UI", system-ui, sans-serif; font-weight: 700; }
+      .tagline { font-family: ui-sans-serif, "Segoe UI", system-ui, sans-serif; font-weight: 400; }
+      .pipeline { font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace; font-weight: 500; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="300" fill="#071726" />
+
+  <!-- left: identity -->
+  <text x="64" y="140" class="wordmark" font-size="60" fill="#f0f9ff" letter-spacing="-1">sq<tspan fill="#38bdf8">uish</tspan></text>
+  <text x="65" y="184" class="tagline" font-size="19" fill="#8fa8bd">Big photos and video, squished down for the web.</text>
+  <text x="65" y="222" class="pipeline" font-size="13.5" fill="#5b7d99" letter-spacing="0.3">jpg/png/mp4  →  resize + re-encode  →  webp/avif/jpeg + mp4/webm</text>
+
+  <!-- divider -->
+  <line x1="620" y1="72" x2="620" y2="230" stroke="#122a3d" stroke-width="1" />
+
+  <!-- right: the pipeline, drawn -->
+  <g>
+    <!-- before: one oversized file (muted, heavy) -->
+    <g>
+      <rect x="666" y="92" width="92" height="116" rx="10" fill="#1e3a52" stroke="#3b5c78" stroke-width="1.5" />
+      <circle cx="695" cy="120" r="9" fill="#3b5c78" />
+      <path d="M 678 190 L 706 152 L 726 174 L 742 156 L 750 190 Z" fill="#3b5c78" />
+    </g>
+    <!-- weight lines: this file is heavy -->
+    <g stroke="#3b5c78" stroke-width="3" stroke-linecap="round" opacity="0.8">
+      <line x1="672" y1="222" x2="700" y2="222" />
+      <line x1="672" y1="232" x2="716" y2="232" />
+    </g>
+
+    <!-- squish: two chevrons pressing inward -->
+    <g fill="none" stroke="#38bdf8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 792 118 L 822 150 L 792 182" />
+      <path d="M 888 118 L 858 150 L 888 182" />
+    </g>
+
+    <!-- after: several small, aligned, optimized outputs -->
+    <g fill="#38bdf8">
+      <rect x="944" y="120" width="14" height="14" rx="3" />
+      <rect x="972" y="120" width="14" height="14" rx="3" />
+      <rect x="1000" y="120" width="14" height="14" rx="3" />
+      <rect x="944" y="148" width="14" height="14" rx="3" />
+      <rect x="972" y="148" width="14" height="14" rx="3" />
+      <rect x="1000" y="148" width="14" height="14" rx="3" />
+      <rect x="944" y="176" width="14" height="14" rx="3" />
+      <rect x="972" y="176" width="14" height="14" rx="3" />
+      <rect x="1000" y="176" width="14" height="14" rx="3" />
+    </g>
+
+    <!-- shipped to the web -->
+    <line x1="1024" y1="155" x2="1064" y2="155" stroke="#38bdf8" stroke-width="2" opacity="0.7" />
+    <circle cx="1094" cy="155" r="26" fill="none" stroke="#38bdf8" stroke-width="1.5" opacity="0.5" />
+    <path d="M 1068 155 A 26 26 0 0 1 1120 155" fill="none" stroke="#38bdf8" stroke-width="1.5" opacity="0.35" />
+    <path d="M 1094 129 A 12 26 0 0 1 1094 181" fill="none" stroke="#38bdf8" stroke-width="1.5" opacity="0.35" />
+    <line x1="1068" y1="155" x2="1120" y2="155" stroke="#38bdf8" stroke-width="1.5" opacity="0.35" />
+  </g>
+</svg>
