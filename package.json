@@ -1,6 +1,6 @@
 {
   "name": "squish-cli",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Resize and re-encode photos (and video, via ffmpeg) for the web - smaller files, no visible quality loss.",
   "license": "MIT",
   "author": "Victor Paniello",
