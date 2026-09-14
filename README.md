@@ -1,7 +1,7 @@
 ![squish](.github/banner.svg)
 
 A CLI that resizes and re-encodes photos (and video, via `ffmpeg`) for the
-web — smaller files, no visible quality loss.
+web: smaller files, no visible quality loss.
 
 ## Why this exists
 
@@ -9,7 +9,7 @@ A phone or camera export is enormous by web standards: 4000px+ on the long
 edge, 10-20MB videos, full EXIF metadata nobody's going to read. Uploading
 that straight into a website means slow page loads for a visitor whose
 screen is never going to render more than ~2000px wide anyway. The usual
-fix — open every file in an image editor, resize, export, repeat — doesn't
+fix (open every file in an image editor, resize, export, repeat) doesn't
 scale past a handful of files, and it's exactly the kind of repetitive step
 that should be a script instead of a habit.
 
@@ -17,11 +17,11 @@ that should be a script instead of a habit.
 caps every image to a sane maximum dimension, re-encodes it as WebP, AVIF,
 and JPEG by default (or any mix of those plus PNG you ask for) at a
 quality setting that's visually indistinguishable from the source, and
-strips the metadata — video gets the equivalent treatment via `ffmpeg`,
+strips the metadata. Video gets the equivalent treatment via `ffmpeg`,
 re-encoded as MP4 (H.264/AAC) and WebM (VP9/Opus) by default, both with
 capped resolution, if `ffmpeg` is installed. Every input file gets its
 own subfolder under `~/squished` (your home directory, by default - see
-`--out` below), holding every requested format side by side — so
+`--out` below), holding every requested format side by side, so
 `photo.jpg` becomes `~/squished/photo/photo.{webp,avif,jpeg}`.
 
 **Real results**, not made-up numbers - `examples/coastline.jpg`, a real
@@ -83,6 +83,19 @@ every source compresses that hard.
 
 ## Install
 
+```bash
+npm install -g squish-cli
+```
+
+The package is named `squish-cli` on npm (`squish` was already taken), but
+the command it installs is `squish`:
+
+```bash
+squish --help
+```
+
+### From source
+
 Requires [Bun](https://bun.sh).
 
 ```bash
@@ -99,9 +112,9 @@ squish --help
 ```
 
 Video support additionally requires [`ffmpeg`](https://ffmpeg.org/download.html)
-on your `PATH` — entirely optional: if it isn't installed, `squish` still
+on your `PATH` (entirely optional: if it isn't installed, `squish` still
 processes every image in the input and skips videos with a clear message
-instead of failing.
+instead of failing).
 
 ## Usage
 
@@ -109,9 +122,9 @@ instead of failing.
 squish ./photos
 ```
 
-- `<input>` (positional, required) — a single file or a directory of files
+- `<input>` (positional, required): a single file or a directory of files
   (not recursive - a flat folder of exports is the common case).
-- `--out, -o <dir>` — output directory. Defaults to `~/squished`
+- `--out, -o <dir>`: output directory. Defaults to `~/squished`
   (your home directory), so running `squish` from anywhere always lands
   in the same predictable place instead of scattering a `squished/`
   folder into whatever directory you happened to be in. Every input file
@@ -119,27 +132,27 @@ squish ./photos
   extension) - `photo.jpg` becomes `<out>/photo/photo.{...}`, so
   requesting several formats for several files never mixes them together
   in one flat folder.
-- `--max-dimension <px>` — longest edge after resizing. Defaults to `2400`
-  — plenty for any screen this is likely to be viewed on. Never upscales a
+- `--max-dimension <px>`: longest edge after resizing. Defaults to `2400`
+  (plenty for any screen this is likely to be viewed on). Never upscales a
   source that's already smaller.
-- `--quality <0-100>` — image quality. Defaults to `82`.
-- `--format <list>` — comma-separated output image format(s), any mix of
+- `--quality <0-100>`: image quality. Defaults to `82`.
+- `--format <list>`: comma-separated output image format(s), any mix of
   `webp`, `avif`, `jpeg`, `png`. One file per requested format, per image.
   Defaults to `webp,avif,jpeg` - PNG is opt-in only (`--format png`), since
   it's lossless and makes a real photo *larger* than the source rather than
   smaller (see the coastline example above).
-- `--video-crf <n>` — video quality, lower = higher quality/bigger file.
+- `--video-crf <n>`: video quality, lower = higher quality/bigger file.
   Defaults to `23`. Shared across both video codecs below, though they
   don't share a CRF scale (see "What it doesn't do (yet)").
-- `--video-max-height <px>` — caps video height, width scales to match.
+- `--video-max-height <px>`: caps video height, width scales to match.
   Defaults to `1080`.
-- `--video-format <list>` — comma-separated output video format(s), any
+- `--video-format <list>`: comma-separated output video format(s), any
   mix of `mp4` (H.264/AAC), `webm` (VP9/Opus). One file per requested
   format, per video. Defaults to `mp4,webm` - the two video formats every
   major browser plays natively; `mov`/`avi`/`mkv` aren't offered as
   *output* formats (only as recognized *input* ones) since none of them
   has reliable native browser playback.
-- `--skip-video` — skip video files entirely, even if `ffmpeg` is
+- `--skip-video`: skip video files entirely, even if `ffmpeg` is
   available.
 
 ```bash
@@ -164,15 +177,15 @@ the previous line only make sense on a live screen.
 
 ## What it doesn't do (yet)
 
-- Recurse into subdirectories — a flat input folder only.
+- Recurse into subdirectories: a flat input folder only.
 - Fuzzy "is this basically the same photo as one already in the output
-  folder" dedup — every input file gets processed independently.
-- Parallel processing — files are optimized one at a time, in order,
+  folder" dedup: every input file gets processed independently.
+- Parallel processing: files are optimized one at a time, in order,
   which is simple and fine at the scale this is meant for (a folder of
   photos for a personal site, not a media pipeline processing thousands
   of files). There is a progress bar (see below) - it just doesn't make
   the work itself go faster.
-- A separate CRF flag per video codec — `--video-crf` feeds both `mp4`
+- A separate CRF flag per video codec: `--video-crf` feeds both `mp4`
   (libx264, ~0-51 scale) and `webm` (libvpx-vp9, ~0-63 scale). The same
   number lands as relatively higher quality (bigger file) on `webm` than
   on `mp4` - a known, documented trade-off for a simpler flag, not a bug.

@@ -1,19 +1,24 @@
 {
-  "name": "squish",
+  "name": "squish-cli",
   "version": "1.0.0",
   "description": "Resize and re-encode photos (and video, via ffmpeg) for the web - smaller files, no visible quality loss.",
   "license": "MIT",
   "author": "Victor Paniello",
   "repository": "github:VictorPaniello/squish",
   "type": "module",
+  "engines": {
+    "node": ">=18.17"
+  },
   "bin": {
-    "squish": "./src/cli.ts"
+    "squish": "dist/cli.js"
   },
   "files": [
-    "src"
+    "dist"
   ],
   "scripts": {
     "start": "bun run src/cli.ts",
+    "build": "bun build src/cli.ts --outfile dist/cli.js --target node --external sharp && sed -i.bak '1s|.*|#!/usr/bin/env node|' dist/cli.js && rm dist/cli.js.bak && chmod +x dist/cli.js",
+    "prepublishOnly": "bun run build",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint",
     "test": "bun test"
