@@ -175,17 +175,23 @@ lines only when output isn't a real terminal - piped to a file, captured
 by a test, running in CI - since carriage-return tricks that overwrite
 the previous line only make sense on a live screen.
 
+Multiple files are converted in parallel, up to one per CPU core, so a
+folder of photos or videos isn't limited to a single core. Video goes a
+step further: each requested format is its own `ffmpeg` subprocess with
+nothing shared between formats, so they're pooled individually too - a
+single video requesting both `--video-format mp4,webm` uses two cores at
+once instead of encoding one format after the other. When more than one
+conversion is in flight the live bar also falls back to plain per-file
+lines - concurrent conversions finishing at different times would
+otherwise fight over the same terminal line - so the bar only ever
+carries the same guarantees described above when it's shown.
+
 ## What it doesn't do (yet)
 
 - Recurse into subdirectories: a flat input folder only.
 - Fuzzy "is this basically the same photo as one already in the output
-  folder" dedup: every input file gets processed independently.
-- Parallel processing: files are optimized one at a time, in order,
-  which is simple and fine at the scale this is meant for (a folder of
-  photos for a personal site, not a media pipeline processing thousands
-  of files). There is a progress bar (see below) - it just doesn't make
-  the work itself go faster.
-- A separate CRF flag per video codec: `--video-crf` feeds both `mp4`
+  folder" dedup — every input file gets processed independently.
+- A separate CRF flag per video codec — `--video-crf` feeds both `mp4`
   (libx264, ~0-51 scale) and `webm` (libvpx-vp9, ~0-63 scale). The same
   number lands as relatively higher quality (bigger file) on `webm` than
   on `mp4` - a known, documented trade-off for a simpler flag, not a bug.

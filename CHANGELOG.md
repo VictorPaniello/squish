@@ -78,6 +78,42 @@ tagged as a release yet, so everything below is under `[Unreleased]`.
   `bun test`).
 - MIT license.
 
+- **Bounded parallel processing**: files within a batch (all images, then
+  all videos) now convert concurrently, up to one per CPU core
+  (`cpus().length`), via a small self-refilling worker pool - no new
+  dependency. Previously every file/format pair was awaited strictly in
+  sequence in `src/cli.ts`, using a single core no matter how many were
+  available; both `sharp` (images) and `ffmpeg` (video, spawned as a
+  subprocess) do their actual encoding in C regardless of the CLI's own
+  language or concurrency, so the win is real multi-core throughput, not
+  a rewrite. The live per-conversion progress bar only renders when a
+  batch's concurrency is 1 (a single file, or only one CPU core) -
+  concurrent files finishing at different times would otherwise
+  interleave `\r` writes on the same terminal line - falling back to the
+  plain per-result lines otherwise.
+- **Images decode once per file, not once per requested format**:
+  `optimizeImage` previously called `sharp(inputPath)` fresh for every
+  output format, so the default 3-format run read and decoded the source
+  photo from disk 3 times for what should be one decode + N encodes.
+  `src/images.ts` now exposes `buildImagePipeline` (decode + EXIF-rotate
+  + resize, once) and `encodeImage` (format-specific encode from a
+  `.clone()` of that pipeline, which shares the already-decoded input
+  instead of re-reading it); `optimizeImage` itself is kept as a thin
+  wrapper composing the two; so existing callers/tests are unaffected.
+  Savings scale with source size and format count - biggest on large
+  camera exports with the default `webp,avif,jpeg` trio.
+- **Video pools per file*format pair, not per file**: each requested
+  video format is its own `ffmpeg` subprocess with nothing shared
+  between them (unlike images, which share one decode across formats -
+  see above), so a file requesting both `mp4` and `webm` previously sat
+  through them one at a time even with cores free. `src/cli.ts` now
+  flattens `videos × videoFormats` into one task list before handing it
+  to the same worker pool, so a run with a handful of large videos each
+  in multiple formats uses more than one core per file. Verified with a
+  fake `ffmpeg` that sleeps 1s per call: one video in 2 formats, and two
+  videos in 2 formats each (4 subprocess calls total), both completed in
+  ~1.1s - all four ran concurrently, not in file-sized batches.
+
 ### Fixed
 - **Sharp reports an AVIF file's read-back format as `"heif"`, not
   `"avif"`** - AVIF is an HEIF-family container. Found running the format

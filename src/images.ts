@@ -28,15 +28,11 @@ export type OptimizeResult = {
   afterBytes: number
 }
 
-export async function optimizeImage(
-  inputPath: string,
-  outDir: string,
-  options: ImageOptions = DEFAULT_IMAGE_OPTIONS
-): Promise<OptimizeResult> {
-  const name = basename(inputPath, extname(inputPath))
-  const outputPath = join(outDir, `${name}.${options.format}`)
-
-  let pipeline = sharp(inputPath)
+/** Decodes + resizes once; call .clone() per output format so the
+ * source is only read/decoded a single time no matter how many formats
+ * get encoded from it (sharp's .clone() shares the decoded input). */
+export function buildImagePipeline(inputPath: string, maxDimension: number): ReturnType<typeof sharp> {
+  return sharp(inputPath)
     // Applies EXIF orientation before the resize/encode below, then
     // sharp's output strips metadata by default (no .withMetadata()
     // call) - without the explicit rotate() first, a photo shot in
@@ -44,11 +40,21 @@ export async function optimizeImage(
     // that would have corrected it for a viewer is gone.
     .rotate()
     .resize({
-      width: options.maxDimension,
-      height: options.maxDimension,
+      width: maxDimension,
+      height: maxDimension,
       fit: "inside",
       withoutEnlargement: true,
     })
+}
+
+export async function encodeImage(
+  pipeline: ReturnType<typeof sharp>,
+  inputPath: string,
+  outDir: string,
+  options: ImageOptions
+): Promise<OptimizeResult> {
+  const name = basename(inputPath, extname(inputPath))
+  const outputPath = join(outDir, `${name}.${options.format}`)
 
   switch (options.format) {
     case "webp":
@@ -69,4 +75,12 @@ export async function optimizeImage(
 
   const [before, after] = await Promise.all([stat(inputPath), stat(outputPath)])
   return { inputPath, outputPath, beforeBytes: before.size, afterBytes: after.size }
+}
+
+export async function optimizeImage(
+  inputPath: string,
+  outDir: string,
+  options: ImageOptions = DEFAULT_IMAGE_OPTIONS
+): Promise<OptimizeResult> {
+  return encodeImage(buildImagePipeline(inputPath, options.maxDimension), inputPath, outDir, options)
 }

@@ -1,15 +1,30 @@
 #!/usr/bin/env bun
 import { mkdir } from "node:fs/promises"
-import { homedir } from "node:os"
+import { cpus, homedir } from "node:os"
 import { basename, extname, join, relative } from "node:path"
 import { Command } from "commander"
 import { findMediaFiles } from "./files.ts"
 import { formatBytes, formatSavings } from "./format.ts"
-import { type ImageFormat, optimizeImage } from "./images.ts"
+import { buildImagePipeline, encodeImage, type ImageFormat } from "./images.ts"
 import { formatProgressBar } from "./progress.ts"
 import { hasFfmpeg, optimizeVideo, type VideoFormat } from "./video.ts"
 
 const DEFAULT_OUT_DIR = join(homedir(), "squished")
+
+/** Runs `worker` over `items` with at most `limit` in flight at once -
+ * lets multiple files convert in parallel across CPU cores instead of
+ * one-at-a-time, without pulling in a dependency for what a fixed pool
+ * of self-refilling workers covers in a few lines. */
+async function runPool<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
+  let next = 0
+  async function run() {
+    while (next < items.length) {
+      const item = items[next++]
+      await worker(item as T)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run))
+}
 
 const program = new Command()
 
@@ -78,7 +93,11 @@ async function main(
   // harness capturing stdout, CI) gets the plain line-per-result output
   // it always had instead: raw \r/ANSI bytes are meaningless once
   // they're not overwriting anything on a live screen.
-  const useProgressBar = process.stdout.isTTY === true
+  // Multiple files can now convert concurrently (see runPool below); a
+  // live \r-redrawn bar only makes sense when a single conversion owns
+  // the terminal line, so it's re-evaluated per batch against that
+  // batch's concurrency instead of being fixed once for the whole run.
+  let useProgressBar = process.stdout.isTTY === true
 
   /** Clears whatever progress bar (if any) is currently drawn on the
    * last line - safe to call even when nothing has been drawn yet. */
@@ -125,14 +144,46 @@ async function main(
     return () => clearInterval(timer)
   }
 
-  /** Processes one file through every requested format, with a fresh
-   * progress bar per individual conversion (one file into one format) -
-   * it resets to 0% the moment the previous format's bar reaches 100%,
-   * rather than tracking progress across the whole file or run. Shared
-   * between the image and video loops below via the `simulate` flag:
-   * video gets real progress from ffmpeg's own reporting (threaded
-   * through as the optimize callback's second argument); images get the
-   * simulated animation above, since sharp has no real signal to give. */
+  /** Runs one file-into-one-format conversion, with its own progress
+   * bar. The unit of work the pools below schedule - images pool at the
+   * file level (formats run in sequence per file, sharing that file's
+   * decoded pipeline - see the image loop), video pools at the
+   * file*format level (each format is its own ffmpeg subprocess, so
+   * there's no shared decode to lose by running them concurrently, and
+   * a file with several formats otherwise leaves cores idle behind a
+   * sequential format loop). `simulate` picks between video's real
+   * ffmpeg-reported progress and images' bounded animation, since sharp
+   * has no real signal to give. */
+  async function processOneConversion<F extends string>(
+    path: string,
+    format: F,
+    simulate: boolean,
+    optimize: (
+      format: F,
+      onProgress: (ratio: number) => void
+    ) => Promise<{ inputPath: string; outputPath: string; beforeBytes: number; afterBytes: number }>
+  ): Promise<void> {
+    const label = basename(path)
+    const convLabel = `${label} -> ${format}`
+    function renderBar(ratio: number) {
+      if (!useProgressBar) return
+      process.stdout.write(`\r\x1b[2K${convLabel} ${formatProgressBar(Math.round(ratio * 100), 100)}`)
+    }
+
+    renderBar(0)
+    const stopSimulation = simulate ? simulateProgress(renderBar) : undefined
+    try {
+      const result = await optimize(format, renderBar)
+      stopSimulation?.()
+      renderBar(1)
+      commitLine(formatResultLine(opts.out, result), () => {})
+    } catch (err) {
+      stopSimulation?.()
+      failures++
+      commitLine(`  ${label} (${format}): FAILED - ${(err as Error).message}`, () => {}, true)
+    }
+  }
+
   async function processFile<F extends string>(
     path: string,
     formats: F[],
@@ -142,41 +193,28 @@ async function main(
       onProgress: (ratio: number) => void
     ) => Promise<{ inputPath: string; outputPath: string; beforeBytes: number; afterBytes: number }>
   ): Promise<void> {
-    const label = basename(path)
-
-    for (const format of formats) {
-      const convLabel = `${label} -> ${format}`
-      function renderBar(ratio: number) {
-        if (!useProgressBar) return
-        process.stdout.write(`\r\x1b[2K${convLabel} ${formatProgressBar(Math.round(ratio * 100), 100)}`)
-      }
-
-      renderBar(0)
-      const stopSimulation = simulate ? simulateProgress(renderBar) : undefined
-      try {
-        const result = await optimize(format, renderBar)
-        stopSimulation?.()
-        renderBar(1)
-        commitLine(formatResultLine(opts.out, result), () => {})
-      } catch (err) {
-        stopSimulation?.()
-        failures++
-        commitLine(`  ${label} (${format}): FAILED - ${(err as Error).message}`, () => {}, true)
-      }
-    }
+    for (const format of formats) await processOneConversion(path, format, simulate, optimize)
   }
+
+  const poolSize = Math.max(1, cpus().length)
 
   if (images.length > 0) {
     commitLine(
       `Images (${images.length}) -> ${opts.out}/<name>/ (${imageFormats.join(", ")})`,
       () => {}
     )
-    for (const path of images) {
+    const concurrency = Math.min(poolSize, images.length)
+    useProgressBar = process.stdout.isTTY === true && concurrency === 1
+    await runPool(images, concurrency, async (path) => {
       const outDir = await fileOutDir(path)
+      // Decoded once per file, then cloned per format below - avoids
+      // re-reading and re-decoding the source image once per output
+      // format.
+      const pipeline = buildImagePipeline(path, imageOptions.maxDimension)
       await processFile(path, imageFormats, true, (format) =>
-        optimizeImage(path, outDir, { ...imageOptions, format })
+        encodeImage(pipeline.clone(), path, outDir, { ...imageOptions, format })
       )
-    }
+    })
   }
 
   if (videos.length > 0) {
@@ -194,12 +232,21 @@ async function main(
         `\nVideo (${videos.length}) -> ${opts.out}/<name>/ (${videoFormats.join(", ")})`,
         () => {}
       )
-      for (const path of videos) {
+      // Pooled per file*format pair, not per file: each format is its
+      // own ffmpeg subprocess with nothing shared between them (unlike
+      // images' decode-once pipeline), so a file with several video
+      // formats would otherwise sit behind a sequential per-format loop
+      // even when other cores are free - the common case of a handful
+      // of large videos each in both mp4 and webm.
+      const tasks = videos.flatMap((path) => videoFormats.map((format) => ({ path, format })))
+      const concurrency = Math.min(poolSize, tasks.length)
+      useProgressBar = process.stdout.isTTY === true && concurrency === 1
+      await runPool(tasks, concurrency, async ({ path, format }) => {
         const outDir = await fileOutDir(path)
-        await processFile(path, videoFormats, false, (format, onProgress) =>
-          optimizeVideo(path, outDir, { ...videoOptions, format }, onProgress)
+        await processOneConversion(path, format, false, (fmt, onProgress) =>
+          optimizeVideo(path, outDir, { ...videoOptions, format: fmt }, onProgress)
         )
-      }
+      })
     }
   }
 
